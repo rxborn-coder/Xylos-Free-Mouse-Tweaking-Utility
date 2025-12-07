@@ -1,373 +1,117 @@
 @echo off
-:: ==========================================================
-::  Xylo Controller Tweaks  –  pure-CMD edition
-::  Creates a restore point, then shows a menu so you
-::  apply only the tweaks you want.
-:: ==========================================================
-setlocal enabledelayedexpansion
-title Xylo Controller Tweaks  [CMD Edition]
-set "tp=%temp%\Ctweak.tmp"
+::  Xylo Controller Tweaks  –  crash-proof CMD edition
+::  -----------------------------------------------------------------
+::  1 = 1000 Hz polling      2 = 8 % dead-zone      3 = 55 % trigger
+::  4 = kill V-Sync hints    5 = kill GameInput     6 = raise IRQ
+::  A = all                  R = revert (restore)   X = quit
+::  -----------------------------------------------------------------
+setlocal EnableDelayedExpansion
+title ControllerTweaks  [CMD Edition]
 
-:: ---------- 1.  Must be elevated  -------------------------
+:: ----------  must be elevated  ------------------------------------
 net session >nul 2>&1 || (
-   echo This script must be run as Administrator.
-   pause & exit /b 1
+    echo This script must be run as Administrator.
+    pause & exit /b 1
 )
 
-:: ---------- 2.  Create restore point  --------------------
+:: ----------  create restore point  --------------------------------
 echo.
-echo  Creating System Restore Point …
-wmic.exe /Namespace:\\root\default Path SystemRestore Call CreateRestorePoint "ControllerTweaks-%date:~-4,4%%date:~-10,2%%date:~-7,2%", 12, 100 >nul 2>&1
-if !errorlevel! neq 0 (
-   echo  WMIC restore-point failed.  Aborting.
-   pause & exit /b 1
+echo Creating System Restore Point ...
+wmic.exe /Namespace:\\root\default Path SystemRestore Call CreateRestorePoint "ControllerTweaks-%DATE:~-4,4%%DATE:~-10,2%%DATE:~-7,2%", 12, 100 >nul 2>&1
+if !errorlevel! NEQ 0 (
+    echo WMIC restore-point failed. Aborting.
+    pause & exit /b 1
 )
-echo  Restore point created.
+echo Restore point created.
 echo.
 
-:: ---------- 3.  Menu  -------------------------------------
+:: ----------  main menu  -------------------------------------------
 :MENU
 cls
 echo  ╔══════════════════════════════════════╗
 echo  ║      Xylo Controller Tweaks          ║
 echo  ╚══════════════════════════════════════╝
 echo.
-echo  [1]  1000 Hz USB polling  (over-clock)
-echo  [2]  Lower stick dead-zone  (8 %%)
-echo  [3]  Shorten trigger travel  (55 %%)
-echo  [4]  Disable V-Sync hints ^& GameDVR
-echo  [5]  Disable Windows "GameInput" services
-echo  [6]  Boost controller IRQ priority
-echo  [A]  Apply ALL tweaks
-echo  [R]  Revert everything  (System Restore)
-echo  [X]  Exit
+echo  [1] 1000 Hz USB polling      [2] 8%% stick dead-zone
+echo  [3] 55%% trigger travel       [4] Disable V-Sync ^& GameDVR
+echo  [5] Disable GameInput        [6] Boost controller IRQ
+echo  [A] Apply ALL tweaks         [R] Revert everything
+echo  [X] Exit
 echo.
-set /P ch=Choose item(s) or A/R/X :
+set /P CH=Choose (1-6,A,R,X) :
 
-if /i "%ch%"=="X" exit /b
-if /i "%ch%"=="R" goto REVERT
-if /i "%ch%"=="A" set ch=123456
+if /i "%CH%"=="X" exit /b
+if /i "%CH%"=="R" goto REVERT
+if /i "%CH%"=="A" set CH=123456
 
-:: ---------- 4.  Apply selected  --------------------------
-echo %ch%| find "1" >nul && call :POLLING
-echo %ch%| find "2" >nul && call :DEADZONE
-echo %ch%| find "3" >nul && call :TRIGGER
-echo %ch%| find "4" >nul && call :VSYNC
-echo %ch%| find "5" >nul && call :GAMINPUT
-echo %ch%| find "6" >nul && call :IRQ
+:: ----------  run chosen tweaks  -----------------------------------
+echo %CH%|find "1">nul&&call :POLLING
+echo %CH%|find "2">nul&&call :DEADZONE
+echo %CH%|find "3">nul&&call :TRIGGER
+echo %CH%|find "4">nul&&call :VSYNC
+echo %CH%|find "5">nul&&call :GAMINPUT
+echo %CH%|find "6">nul&&call :IRQ
 
 echo.
-echo  Done.  Reboot recommended for items 1,6.
+echo All selected tweaks finished. Reboot recommended for 1 and 6.
 pause
 goto MENU
 
-:: ==========================================================
-::  Sub-routines
-:: ==========================================================
+:: ##################################################################
+::  Sub-routines (safe against missing keys)
+:: ##################################################################
 :POLLING
-echo  + Setting 1000 Hz USB polling …
-reg add "HKLM\SYSTEM\CurrentControlSet\Services\HidUsb\Parameters" /v MaximumTransferSize /t REG_DWORD /d 64  /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Services\HidUsb\Parameters" /v PollingInterval     /t REG_DWORD /d 1   /f >nul
-echo    ✓ Finished 1000 Hz polling.
-exit /b
+echo + Setting 1000 Hz USB polling ...
+reg query "HKLM\SYSTEM\CurrentControlSet\Services\HidUsb\Parameters">nul 2>&1||reg add "HKLM\SYSTEM\CurrentControlSet\Services\HidUsb\Parameters">nul 2>&1
+reg add "HKLM\SYSTEM\CurrentControlSet\Services\HidUsb\Parameters" /v MaximumTransferSize /t REG_DWORD /d 64 /f >nul 2>&1
+reg add "HKLM\SYSTEM\CurrentControlSet\Services\HidUsb\Parameters" /v PollingInterval     /t REG_DWORD /d 1  /f >nul 2>&1
+echo   DONE - 1000 Hz polling
+goto :eof
 
 :DEADZONE
-echo  + Lowering stick dead-zone to 8 %%
-for /f "tokens=1* delims=\" %%i in ('reg query "HKLM\SYSTEM\CurrentControlSet\Enum" /s /f "HID\VID_" /k 2^>nul ^| findstr "HID"') do (
-    reg add "HKLM\SYSTEM\CurrentControlSet\Enum\%%i\%%j\Device Parameters" /v StickDeadZoneL /t REG_DWORD /d 8 /f >nul 2>&1
-    reg add "HKLM\SYSTEM\CurrentControlSet\Enum\%%i\%%j\Device Parameters" /v StickDeadZoneR /t REG_DWORD /d 8 /f >nul 2>&1
+echo + Lowering stick dead-zone to 8%%
+for /f "delims=" %%K in ('reg query "HKLM\SYSTEM\CurrentControlSet\Enum" /s /f "HID\VID_" /k 2^>nul ^| findstr "HID"') do (
+    reg add "%%K\Device Parameters" /v StickDeadZoneL /t REG_DWORD /d 8 /f >nul 2>&1
+    reg add "%%K\Device Parameters" /v StickDeadZoneR /t REG_DWORD /d 8 /f >nul 2>&1
 )
-echo    ✓ Finished dead-zone tweak.
-exit /b
+echo   DONE - dead-zone tweak
+goto :eof
 
 :TRIGGER
-echo  + Shortening trigger travel to 55 %%
-for /f "tokens=1* delims=\" %%i in ('reg query "HKLM\SYSTEM\CurrentControlSet\Enum" /s /f "HID\VID_" /k 2^>nul ^| findstr "HID"') do (
-    reg add "HKLM\SYSTEM\CurrentControlSet\Enum\%%i\%%j\Device Parameters" /v TriggerThresh /t REG_DWORD /d 55 /f >nul 2>&1
+echo + Shortening trigger travel to 55%%
+for /f "delims=" %%K in ('reg query "HKLM\SYSTEM\CurrentControlSet\Enum" /s /f "HID\VID_" /k 2^>nul ^| findstr "HID"') do (
+    reg add "%%K\Device Parameters" /v TriggerThresh /t REG_DWORD /d 55 /f >nul 2>&1
 )
-echo    ✓ Finished trigger tweak.
-exit /b
+echo   DONE - trigger tweak
+goto :eof
 
 :VSYNC
-echo  + Disabling V-Sync hints / GameDVR …
-reg add "HKCU\Software\Microsoft\Games" /v GameDVR_Enabled /t REG_DWORD /d 0 /f >nul
-reg add "HKCU\Software\Microsoft\Games" /v AllowGameDVR     /t REG_DWORD /d 0 /f >nul
-reg add "HKCU\System\GameConfigStore"   /v GameDVR_HonorUserFSEBehaviorMode /t REG_DWORD /d 1 /f >nul
-reg add "HKCU\System\GameConfigStore"   /v GameDVR_FSEBehaviorMode          /t REG_DWORD /d 2 /f >nul
-echo    ✓ Finished V-Sync / GameDVR tweak.
-exit /b
+echo + Disabling V-Sync hints ^& GameDVR
+reg add "HKCU\Software\Microsoft\Games"        /v GameDVR_Enabled /t REG_DWORD /d 0 /f >nul 2>&1
+reg add "HKCU\Software\Microsoft\Games"        /v AllowGameDVR     /t REG_DWORD /d 0 /f >nul 2>&1
+reg add "HKCU\System\GameConfigStore" /v GameDVR_HonorUserFSEBehaviorMode /t REG_DWORD /d 1 /f >nul 2>&1
+reg add "HKCU\System\GameConfigStore" /v GameDVR_FSEBehaviorMode          /t REG_DWORD /d 2 /f >nul 2>&1
+echo   DONE - V-Sync / GameDVR tweak
+goto :eof
 
 :GAMINPUT
-echo  + Disabling GameInput services …
+echo + Disabling GameInput services
 sc stop "GameInput Service"        >nul 2>&1
-sc config "GameInput Service" start= disabled >nul
+sc config "GameInput Service" start= disabled >nul 2>&1
 sc stop "GameInput Redistributable" >nul 2>&1
-sc config "GameInput Redistributable" start= disabled >nul
-echo    ✓ Finished GameInput services.
-exit /b
+sc config "GameInput Redistributable" start= disabled >nul 2>&1
+echo   DONE - GameInput services
+goto :eof
 
 :IRQ
-echo  + Boosting controller IRQ priority …
-:: find first HID IRQ and raise it
-for /f "tokens=2 delims==" %%a in ('wmic path Win32_DeviceMemoryAddress get Name^,MemoryAddress /format:list ^| findstr "HID"') do (
-   set irq=%%a
-   goto gotIRQ
+echo + Boosting controller IRQ priority
+for /f "tokens=2 delims==" %%A in ('wmic path Win32_DeviceMemoryAddress get Name^,MemoryAddress /format:list ^| findstr /i "HID"') do (
+   set "irq=%%A"
+   goto :gotIRQ
 )
 :gotIRQ
 if defined irq reg add "HKLM\SYSTEM\CurrentControlSet\Control\PriorityControl" /v IRQ%irq:,=%Priority /t REG_DWORD /d 1 /f >nul 2>&1
-echo    ✓ Finished IRQ priority tweak.
-exit /b
+echo   DONE - IRQ priority tweak
+goto :eof
 
-:REVERT
-cls
-echo  Starting System Restore …
-rstrui.exe
-exit /b@echo off
-:: ==========================================================
-::  Xylo Controller Tweaks  –  pure-CMD edition
-::  Creates a restore point, then shows a menu so you
-::  apply only the tweaks you want.
-:: ==========================================================
-setlocal enabledelayedexpansion
-title Xylo Controller Tweaks  [CMD Edition]
-set "tp=%temp%\Ctweak.tmp"
-
-:: ---------- 1.  Must be elevated  -------------------------
-net session >nul 2>&1 || (
-   echo This script must be run as Administrator.
-   pause & exit /b 1
-)
-
-:: ---------- 2.  Create restore point  --------------------
-echo.
-echo  Creating System Restore Point …
-wmic.exe /Namespace:\\root\default Path SystemRestore Call CreateRestorePoint "ControllerTweaks-%date:~-4,4%%date:~-10,2%%date:~-7,2%", 12, 100 >nul 2>&1
-if !errorlevel! neq 0 (
-   echo  WMIC restore-point failed.  Aborting.
-   pause & exit /b 1
-)
-echo  Restore point created.
-echo.
-
-:: ---------- 3.  Menu  -------------------------------------
-:MENU
-cls
-echo  ╔══════════════════════════════════════╗
-echo  ║      Xylo Controller Tweaks          ║
-echo  ╚══════════════════════════════════════╝
-echo.
-echo  [1]  1000 Hz USB polling  (over-clock)
-echo  [2]  Lower stick dead-zone  (8 %%)
-echo  [3]  Shorten trigger travel  (55 %%)
-echo  [4]  Disable V-Sync hints ^& GameDVR
-echo  [5]  Disable Windows "GameInput" services
-echo  [6]  Boost controller IRQ priority
-echo  [A]  Apply ALL tweaks
-echo  [R]  Revert everything  (System Restore)
-echo  [X]  Exit
-echo.
-set /P ch=Choose item(s) or A/R/X :
-
-if /i "%ch%"=="X" exit /b
-if /i "%ch%"=="R" goto REVERT
-if /i "%ch%"=="A" set ch=123456
-
-:: ---------- 4.  Apply selected  --------------------------
-echo %ch%| find "1" >nul && call :POLLING
-echo %ch%| find "2" >nul && call :DEADZONE
-echo %ch%| find "3" >nul && call :TRIGGER
-echo %ch%| find "4" >nul && call :VSYNC
-echo %ch%| find "5" >nul && call :GAMINPUT
-echo %ch%| find "6" >nul && call :IRQ
-
-echo.
-echo  Done.  Reboot recommended for items 1,6.
-pause
-goto MENU
-
-:: ==========================================================
-::  Sub-routines
-:: ==========================================================
-:POLLING
-echo  + Setting 1000 Hz USB polling …
-reg add "HKLM\SYSTEM\CurrentControlSet\Services\HidUsb\Parameters" /v MaximumTransferSize /t REG_DWORD /d 64  /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Services\HidUsb\Parameters" /v PollingInterval     /t REG_DWORD /d 1   /f >nul
-echo    ✓ Finished 1000 Hz polling.
-exit /b
-
-:DEADZONE
-echo  + Lowering stick dead-zone to 8 %%
-for /f "tokens=1* delims=\" %%i in ('reg query "HKLM\SYSTEM\CurrentControlSet\Enum" /s /f "HID\VID_" /k 2^>nul ^| findstr "HID"') do (
-    reg add "HKLM\SYSTEM\CurrentControlSet\Enum\%%i\%%j\Device Parameters" /v StickDeadZoneL /t REG_DWORD /d 8 /f >nul 2>&1
-    reg add "HKLM\SYSTEM\CurrentControlSet\Enum\%%i\%%j\Device Parameters" /v StickDeadZoneR /t REG_DWORD /d 8 /f >nul 2>&1
-)
-echo    ✓ Finished dead-zone tweak.
-exit /b
-
-:TRIGGER
-echo  + Shortening trigger travel to 55 %%
-for /f "tokens=1* delims=\" %%i in ('reg query "HKLM\SYSTEM\CurrentControlSet\Enum" /s /f "HID\VID_" /k 2^>nul ^| findstr "HID"') do (
-    reg add "HKLM\SYSTEM\CurrentControlSet\Enum\%%i\%%j\Device Parameters" /v TriggerThresh /t REG_DWORD /d 55 /f >nul 2>&1
-)
-echo    ✓ Finished trigger tweak.
-exit /b
-
-:VSYNC
-echo  + Disabling V-Sync hints / GameDVR …
-reg add "HKCU\Software\Microsoft\Games" /v GameDVR_Enabled /t REG_DWORD /d 0 /f >nul
-reg add "HKCU\Software\Microsoft\Games" /v AllowGameDVR     /t REG_DWORD /d 0 /f >nul
-reg add "HKCU\System\GameConfigStore"   /v GameDVR_HonorUserFSEBehaviorMode /t REG_DWORD /d 1 /f >nul
-reg add "HKCU\System\GameConfigStore"   /v GameDVR_FSEBehaviorMode          /t REG_DWORD /d 2 /f >nul
-echo    ✓ Finished V-Sync / GameDVR tweak.
-exit /b
-
-:GAMINPUT
-echo  + Disabling GameInput services …
-sc stop "GameInput Service"        >nul 2>&1
-sc config "GameInput Service" start= disabled >nul
-sc stop "GameInput Redistributable" >nul 2>&1
-sc config "GameInput Redistributable" start= disabled >nul
-echo    ✓ Finished GameInput services.
-exit /b
-
-:IRQ
-echo  + Boosting controller IRQ priority …
-:: find first HID IRQ and raise it
-for /f "tokens=2 delims==" %%a in ('wmic path Win32_DeviceMemoryAddress get Name^,MemoryAddress /format:list ^| findstr "HID"') do (
-   set irq=%%a
-   goto gotIRQ
-)
-:gotIRQ
-if defined irq reg add "HKLM\SYSTEM\CurrentControlSet\Control\PriorityControl" /v IRQ%irq:,=%Priority /t REG_DWORD /d 1 /f >nul 2>&1
-echo    ✓ Finished IRQ priority tweak.
-exit /b
-
-:REVERT
-cls
-echo  Starting System Restore …
-rstrui.exe
-exit /b@echo off
-:: ==========================================================
-::  Xylo Controller Tweaks  –  pure-CMD edition
-::  Creates a restore point, then shows a menu so you
-::  apply only the tweaks you want.
-:: ==========================================================
-setlocal enabledelayedexpansion
-title Xylo Controller Tweaks  [CMD Edition]
-set "tp=%temp%\Ctweak.tmp"
-
-:: ---------- 1.  Must be elevated  -------------------------
-net session >nul 2>&1 || (
-   echo This script must be run as Administrator.
-   pause & exit /b 1
-)
-
-:: ---------- 2.  Create restore point  --------------------
-echo.
-echo  Creating System Restore Point …
-wmic.exe /Namespace:\\root\default Path SystemRestore Call CreateRestorePoint "ControllerTweaks-%date:~-4,4%%date:~-10,2%%date:~-7,2%", 12, 100 >nul 2>&1
-if !errorlevel! neq 0 (
-   echo  WMIC restore-point failed.  Aborting.
-   pause & exit /b 1
-)
-echo  Restore point created.
-echo.
-
-:: ---------- 3.  Menu  -------------------------------------
-:MENU
-cls
-echo  ╔══════════════════════════════════════╗
-echo  ║      Xylo Controller Tweaks          ║
-echo  ╚══════════════════════════════════════╝
-echo.
-echo  [1]  1000 Hz USB polling  (over-clock)
-echo  [2]  Lower stick dead-zone  (8 %%)
-echo  [3]  Shorten trigger travel  (55 %%)
-echo  [4]  Disable V-Sync hints ^& GameDVR
-echo  [5]  Disable Windows "GameInput" services
-echo  [6]  Boost controller IRQ priority
-echo  [A]  Apply ALL tweaks
-echo  [R]  Revert everything  (System Restore)
-echo  [X]  Exit
-echo.
-set /P ch=Choose item(s) or A/R/X :
-
-if /i "%ch%"=="X" exit /b
-if /i "%ch%"=="R" goto REVERT
-if /i "%ch%"=="A" set ch=123456
-
-:: ---------- 4.  Apply selected  --------------------------
-echo %ch%| find "1" >nul && call :POLLING
-echo %ch%| find "2" >nul && call :DEADZONE
-echo %ch%| find "3" >nul && call :TRIGGER
-echo %ch%| find "4" >nul && call :VSYNC
-echo %ch%| find "5" >nul && call :GAMINPUT
-echo %ch%| find "6" >nul && call :IRQ
-
-echo.
-echo  Done.  Reboot recommended for items 1,6.
-pause
-goto MENU
-
-:: ==========================================================
-::  Sub-routines
-:: ==========================================================
-:POLLING
-echo  + Setting 1000 Hz USB polling …
-reg add "HKLM\SYSTEM\CurrentControlSet\Services\HidUsb\Parameters" /v MaximumTransferSize /t REG_DWORD /d 64  /f >nul
-reg add "HKLM\SYSTEM\CurrentControlSet\Services\HidUsb\Parameters" /v PollingInterval     /t REG_DWORD /d 1   /f >nul
-echo    ✓ Finished 1000 Hz polling.
-exit /b
-
-:DEADZONE
-echo  + Lowering stick dead-zone to 8 %%
-for /f "tokens=1* delims=\" %%i in ('reg query "HKLM\SYSTEM\CurrentControlSet\Enum" /s /f "HID\VID_" /k 2^>nul ^| findstr "HID"') do (
-    reg add "HKLM\SYSTEM\CurrentControlSet\Enum\%%i\%%j\Device Parameters" /v StickDeadZoneL /t REG_DWORD /d 8 /f >nul 2>&1
-    reg add "HKLM\SYSTEM\CurrentControlSet\Enum\%%i\%%j\Device Parameters" /v StickDeadZoneR /t REG_DWORD /d 8 /f >nul 2>&1
-)
-echo    ✓ Finished dead-zone tweak.
-exit /b
-
-:TRIGGER
-echo  + Shortening trigger travel to 55 %%
-for /f "tokens=1* delims=\" %%i in ('reg query "HKLM\SYSTEM\CurrentControlSet\Enum" /s /f "HID\VID_" /k 2^>nul ^| findstr "HID"') do (
-    reg add "HKLM\SYSTEM\CurrentControlSet\Enum\%%i\%%j\Device Parameters" /v TriggerThresh /t REG_DWORD /d 55 /f >nul 2>&1
-)
-echo    ✓ Finished trigger tweak.
-exit /b
-
-:VSYNC
-echo  + Disabling V-Sync hints / GameDVR …
-reg add "HKCU\Software\Microsoft\Games" /v GameDVR_Enabled /t REG_DWORD /d 0 /f >nul
-reg add "HKCU\Software\Microsoft\Games" /v AllowGameDVR     /t REG_DWORD /d 0 /f >nul
-reg add "HKCU\System\GameConfigStore"   /v GameDVR_HonorUserFSEBehaviorMode /t REG_DWORD /d 1 /f >nul
-reg add "HKCU\System\GameConfigStore"   /v GameDVR_FSEBehaviorMode          /t REG_DWORD /d 2 /f >nul
-echo    ✓ Finished V-Sync / GameDVR tweak.
-exit /b
-
-:GAMINPUT
-echo  + Disabling GameInput services …
-sc stop "GameInput Service"        >nul 2>&1
-sc config "GameInput Service" start= disabled >nul
-sc stop "GameInput Redistributable" >nul 2>&1
-sc config "GameInput Redistributable" start= disabled >nul
-echo    ✓ Finished GameInput services.
-exit /b
-
-:IRQ
-echo  + Boosting controller IRQ priority …
-:: find first HID IRQ and raise it
-for /f "tokens=2 delims==" %%a in ('wmic path Win32_DeviceMemoryAddress get Name^,MemoryAddress /format:list ^| findstr "HID"') do (
-   set irq=%%a
-   goto gotIRQ
-)
-:gotIRQ
-if defined irq reg add "HKLM\SYSTEM\CurrentControlSet\Control\PriorityControl" /v IRQ%irq:,=%Priority /t REG_DWORD /d 1 /f >nul 2>&1
-echo    ✓ Finished IRQ priority tweak.
-exit /b
-
-:REVERT
-cls
-echo  Starting System Restore …
-rstrui.exe
-exit /b
+:REV
